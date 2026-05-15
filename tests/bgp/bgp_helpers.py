@@ -33,6 +33,7 @@ BGP_PLAIN_TEMPLATE = 'bgp_plain.j2'
 BGP_NO_EXPORT_TEMPLATE = 'bgp_no_export.j2'
 BGP_CONFIG_BACKUP = 'backup_bgpd.conf.j2'
 DEFAULT_BGP_CONFIG = '/usr/share/sonic/templates/bgpd/bgpd.conf.j2'
+DEFAULT_BGP_CONFIG_UNIFIED = '/usr/share/sonic/templates/bgpd/bgpd.main.conf.j2'
 DUMP_FILE = "/tmp/bgp_monitor_dump.log"
 CUSTOM_DUMP_SCRIPT = "bgp/bgp_monitor_dump.py"
 CUSTOM_DUMP_SCRIPT_DEST = "/usr/share/exabgp/bgp_monitor_dump.py"
@@ -74,6 +75,23 @@ TCPDUMP_WAIT_TIMEOUT = 20
 LOCAL_PCAP_FILE_TEMPLATE = "%s_dump.pcap"
 
 
+def get_bgp_config_path(duthost):
+    """
+    Get the BGP config template path based on the docker routing config mode.
+    In unified mode, frr.conf.j2 includes bgpd/bgpd.main.conf.j2 directly,
+    so that is the file the test must replace. In separated mode, bgpd.conf.j2 is used.
+    """
+    try:
+        routing_mode = duthost.shell(
+            "sonic-cfggen -d -v DEVICE_METADATA.localhost.docker_routing_config_mode"
+        )['stdout'].strip()
+    except Exception:
+        routing_mode = 'separated'
+    if routing_mode == 'unified':
+        return DEFAULT_BGP_CONFIG_UNIFIED
+    return DEFAULT_BGP_CONFIG
+
+
 def apply_bgp_config(duthost, template_name):
     """
     Apply bgp configuration on the bgp docker of DUT
@@ -82,7 +100,7 @@ def apply_bgp_config(duthost, template_name):
         duthost: DUT host object
         template_name: pathname of the bgp config on the DUT
     """
-    duthost.docker_copy_to_all_asics('bgp', template_name, DEFAULT_BGP_CONFIG)
+    duthost.docker_copy_to_all_asics('bgp', template_name, get_bgp_config_path(duthost))
     duthost.restart_service("bgp")
     pytest_assert(wait_until(100, 10, 0, duthost.is_service_fully_started_per_asic_or_host, "bgp"), "BGP not started.")
     pytest_assert(wait_until(100, 10, 0, duthost.is_service_fully_started_per_asic_or_host, "swss"),
@@ -144,9 +162,9 @@ def apply_default_bgp_config(duthost, copy=False):
     """
     bgp_config_backup = os.path.join(DUT_TMP_DIR, BGP_CONFIG_BACKUP)
     if copy:
-        duthost.docker_copy_from_asic('bgp', DEFAULT_BGP_CONFIG, bgp_config_backup)
+        duthost.docker_copy_from_asic('bgp', get_bgp_config_path(duthost), bgp_config_backup)
     else:
-        duthost.docker_copy_to_all_asics('bgp', bgp_config_backup, DEFAULT_BGP_CONFIG)
+        duthost.docker_copy_to_all_asics('bgp', bgp_config_backup, get_bgp_config_path(duthost))
         # Skip 'start-limit-hit' threshold
         duthost.reset_service("bgp")
         duthost.restart_service("bgp")
